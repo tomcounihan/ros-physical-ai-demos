@@ -26,7 +26,8 @@ from launch.substitutions import LaunchConfiguration, PathJoinSubstitution
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterFile
 from launch_ros.substitutions import FindPackageShare
-from nav2_common.launch import ReplaceString, RewrittenYaml
+
+from pai_bringup.launch_utils import ReplaceString
 
 
 def launch_setup(context, *args, **kwargs):
@@ -47,19 +48,11 @@ def launch_setup(context, *args, **kwargs):
     cam_static_rpy = LaunchConfiguration("cam_static_rpy").perform(context)
 
     # Process controller parameters for ros2_control_node
-    controllers_file_replaced = ReplaceString(
+    controllers_file_str = ReplaceString(
         source_file=controllers_file,
         replacements={"<robot_namespace>": ""},
-    )
-    controller_parameters = ParameterFile(
-        RewrittenYaml(
-            source_file=controllers_file_replaced,
-            root_key="",
-            param_rewrites={},
-            convert_types=True,
-        ),
-        allow_substs=True,
-    )
+    ).perform(context)
+    controller_parameters = ParameterFile(controllers_file_str, allow_substs=True)
 
     ros2_control_node = Node(
         package="controller_manager",
@@ -91,11 +84,14 @@ def launch_setup(context, *args, **kwargs):
                 f" cam_static_xyz:='{cam_static_xyz}'"
                 f" cam_static_rpy:='{cam_static_rpy}'"
             ),
+            "controllers_file": controllers_file_str,
             "use_sim_time": "false",
             "initial_joint_controller": initial_joint_controller,
             "launch_rviz": launch_rviz,
             "rviz_config_file": rviz_config_file,
             "launch_rerun": launch_rerun,
+            "mcp": LaunchConfiguration("mcp"),
+            "mcp_port": LaunchConfiguration("mcp_port"),
         }.items(),
     )
 
@@ -185,6 +181,17 @@ def generate_launch_description():
             "launch_rerun",
             default_value="false",
             description="Launch the pai_rerun_visualizer node?",
+        ),
+        DeclareLaunchArgument(
+            "mcp",
+            default_value="false",
+            description="Enable the ROS MCP interface (rosbridge_server websocket + rosapi)? "
+            "Binds all interfaces (0.0.0.0) on mcp_port.",
+        ),
+        DeclareLaunchArgument(
+            "mcp_port",
+            default_value="9090",
+            description="Port for the rosbridge_server websocket.",
         ),
         DeclareLaunchArgument(
             "rviz_config_file",

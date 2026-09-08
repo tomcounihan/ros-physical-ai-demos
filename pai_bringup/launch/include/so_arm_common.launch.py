@@ -33,8 +33,12 @@ import os
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument, IncludeLaunchDescription, OpaqueFunction, RegisterEventHandler
+from launch.conditions import IfCondition
 from launch.event_handlers import OnProcessExit
-from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.launch_description_sources import (
+    FrontendLaunchDescriptionSource,
+    PythonLaunchDescriptionSource,
+)
 from launch.substitutions import (
     Command,
     FindExecutable,
@@ -43,6 +47,7 @@ from launch.substitutions import (
 )
 from launch_ros.actions import Node
 from launch_ros.parameter_descriptions import ParameterValue
+from launch_ros.substitutions import FindPackageShare
 
 
 def launch_setup(context, *args, **kwargs):
@@ -50,12 +55,15 @@ def launch_setup(context, *args, **kwargs):
     description_file = LaunchConfiguration("description_file").perform(context)
     description_xacro_args = LaunchConfiguration("description_xacro_args").perform(context)
     ros2_control_file = LaunchConfiguration("ros2_control_file").perform(context)
+    controllers_file = LaunchConfiguration("controllers_file").perform(context)
     use_sim_time = LaunchConfiguration("use_sim_time").perform(context).lower() == "true"
     initial_joint_controller = LaunchConfiguration("initial_joint_controller").perform(context)
     activate_joint_controller = LaunchConfiguration("activate_joint_controller").perform(context).lower() == "true"
     launch_rviz = LaunchConfiguration("launch_rviz").perform(context).lower() == "true"
     rviz_config_file = LaunchConfiguration("rviz_config_file").perform(context)
     launch_rerun = LaunchConfiguration("launch_rerun").perform(context).lower() == "true"
+    mcp = LaunchConfiguration("mcp")
+    mcp_port = LaunchConfiguration("mcp_port")
 
     # Build robot description via xacro
     xacro_cmd = [
@@ -78,6 +86,20 @@ def launch_setup(context, *args, **kwargs):
         parameters=[robot_description, {"use_sim_time": use_sim_time}],
     )
 
+    # Controllers do not inherit the controller manager's YAML; spawners must
+    # pass it or they start with uninitialized parameters (e.g. joints).
+    param_file_args = ["--param-file", controllers_file] if controllers_file else []
+    # Switch and service calls wait for the controller manager update loop,
+    # which in sim only runs once the world is stepping.
+    param_file_args += [
+        "--switch-timeout",
+        "60",
+        "--service-call-timeout",
+        "60",
+        "--controller-manager-timeout",
+        "60",
+    ]
+
     joint_state_broadcaster_spawner = Node(
         package="controller_manager",
         executable="spawner",
@@ -85,14 +107,15 @@ def launch_setup(context, *args, **kwargs):
             "joint_state_broadcaster",
             "--controller-manager",
             "/controller_manager",
+            *param_file_args,
         ],
         output="both",
     )
 
     # Initial joint controller - started or stopped depending on argument
-    controller_args = [initial_joint_controller, "-c", "/controller_manager"]
+    controller_args = [initial_joint_controller, "-c", "/controller_manager", *param_file_args]
     if not activate_joint_controller:
-        controller_args.append("--stopped")
+        controller_args.append("--inactive")
     initial_joint_controller_spawner = Node(
         package="controller_manager",
         executable="spawner",
@@ -110,9 +133,9 @@ def launch_setup(context, *args, **kwargs):
     # since that controller does not include the gripper joint.
     # With forward_position_controller (default), the gripper joint is already included.
     if initial_joint_controller == "joint_trajectory_controller":
-        gripper_controller_args = ["gripper_controller", "-c", "/controller_manager"]
+        gripper_controller_args = ["gripper_controller", "-c", "/controller_manager", *param_file_args]
         if not activate_joint_controller:
-            gripper_controller_args.append("--stopped")
+            gripper_controller_args.append("--inactive")
         gripper_controller_spawner = Node(
             package="controller_manager",
             executable="spawner",
@@ -156,6 +179,23 @@ def launch_setup(context, *args, **kwargs):
         )
         nodes.append(delay_rerun_after_joint_state_broadcaster)
 
+    # rosbridge websocket (+ rosapi), e.g. as the interaction port for the ROS MCP
+    # server. Off by default; when enabled it binds all interfaces (0.0.0.0).
+    rosbridge = IncludeLaunchDescription(
+        FrontendLaunchDescriptionSource(
+            PathJoinSubstitution(
+                [
+                    FindPackageShare("rosbridge_server"),
+                    "launch",
+                    "rosbridge_websocket_launch.xml",
+                ]
+            )
+        ),
+        launch_arguments={"port": mcp_port}.items(),
+        condition=IfCondition(mcp),
+    )
+    nodes.append(rosbridge)
+
     return nodes
 
 
@@ -170,6 +210,12 @@ def generate_launch_description():
             "description_xacro_args",
             default_value="",
             description="Extra arguments to pass to the xacro command.",
+        ),
+        DeclareLaunchArgument(
+            "controllers_file",
+            default_value="",
+            description="Path to the ros2_controllers YAML file. Passed to each controller "
+            "spawner as '--param-file' so the controllers get their parameters.",
         ),
         DeclareLaunchArgument(
             "ros2_control_file",
@@ -209,6 +255,17 @@ def generate_launch_description():
             "launch_rerun",
             default_value="true",
             description="Launch the pai_rerun_visualizer node.",
+        ),
+        DeclareLaunchArgument(
+            "mcp",
+            default_value="false",
+            description="Enable the ROS MCP interface (rosbridge_server websocket + rosapi)? "
+            "Binds all interfaces (0.0.0.0) on the configured port.",
+        ),
+        DeclareLaunchArgument(
+            "mcp_port",
+            default_value="9090",
+            description="Port for the rosbridge_server websocket.",
         ),
     ]
 

@@ -9,16 +9,15 @@ Requires Linux and [Pixi](https://pixi.sh/latest/installation/) (which bundles R
 ```bash
 git clone https://github.com/ros-physical-ai/demos
 cd demos
-vcs import external < pai.repos --recursive
 pixi install
-pixi run install-ml-deps   # PyTorch + LeRobot (auto-detects GPU)
+pixi run install-deps
 pixi run build
 ```
 
 Launch the SO-ARM101 in Gazebo (start the Zenoh router first, in its own terminal):
 
 ```bash
-pixi run start_zenoh   # terminal 1
+pixi run zenoh-router  # terminal 1
 pixi run so-arm-gz     # terminal 2
 ```
 
@@ -28,16 +27,17 @@ See [Running the Robot](docs/running-the-robot.md) for MuJoCo and real-hardware 
 
 Full documentation lives in [`docs/`](docs/README.md). Highlights:
 
-| Guide                                                             | What it covers                                                         |
-| ----------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| [Installation](docs/installation.md)                              | Requirements, Pixi install, manual install, `rmw_zenoh`                |
-| [Development Guide](docs/development.md)                          | Pixi workflow, building, FAQ, troubleshooting                          |
-| [Running the Robot](docs/running-the-robot.md)                    | Launching in Gazebo, MuJoCo, or on real hardware                       |
-| [Hardware Setup](docs/README.md#hardware-setup)                   | Calibration, udev rules, cameras                                       |
-| [Teleoperation](docs/teleoperation.md)                            | Leader arm, RViz interactive marker, phone (WebXR)                     |
-| [End-to-End Learning Pipeline](docs/demos/end-to-end-pipeline.md) | Record → Train → Deploy with Rosetta and LeRobot                       |
-| [Try a Pre-trained Policy](docs/demos/pretrained-demo.md)         | Skip the slow loop — run a pre-trained ACT policy in Gazebo in minutes |
-| [Contributing](docs/contributing.md)                              | Linting and pre-commit hooks                                           |
+| Guide                                                             | What it covers                                                                                                       |
+| ----------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| [Installation](docs/installation.md)                              | Requirements, Pixi install, manual install, `rmw_zenoh`                                                              |
+| [Development Guide](docs/development.md)                          | Pixi workflow, building, FAQ, troubleshooting                                                                        |
+| [Running the Robot](docs/running-the-robot.md)                    | Launching in Gazebo, MuJoCo, or on real hardware                                                                     |
+| [Hardware Setup](docs/README.md#hardware-setup)                   | Calibration, udev rules, cameras                                                                                     |
+| [Teleoperation](docs/teleoperation.md)                            | Leader arm, RViz interactive marker, phone (WebXR)                                                                   |
+| [MCP Interface](docs/mcp.md)                                      | Use an AI agent to control, introspect, or debug the robot via [ROS-MCP](https://github.com/robotmcp/ros-mcp-server) |
+| [End-to-End Learning Pipeline](docs/demos/end-to-end-pipeline.md) | Record → Train → Deploy with Rosetta and LeRobot                                                                     |
+| [Try a Pre-trained Policy](docs/demos/pretrained-demo.md)         | Skip the slow loop — run a pre-trained ACT policy in Gazebo in minutes                                               |
+| [Contributing](docs/contributing.md)                              | Linting and pre-commit hooks                                                                                         |
 
 ## Packages
 

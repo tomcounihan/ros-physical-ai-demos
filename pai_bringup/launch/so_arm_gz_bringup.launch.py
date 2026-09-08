@@ -12,13 +12,17 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import re
+
 from launch import LaunchDescription
 from launch.actions import (
     DeclareLaunchArgument,
     ExecuteProcess,
     IncludeLaunchDescription,
     OpaqueFunction,
+    RegisterEventHandler,
 )
+from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import (
     Command,
@@ -28,8 +32,18 @@ from launch.substitutions import (
 )
 from launch_ros.actions import Node
 from launch_ros.substitutions import FindPackageShare
-from nav2_common.launch import ReplaceString
 from ros_gz_sim.actions import GzServer
+
+from pai_bringup.launch_utils import ReplaceString
+
+
+def _world_name(world_sdf_path):
+    """Return the <world name="..."> declared in an SDF world file."""
+    with open(world_sdf_path) as world_file:
+        match = re.search(r"<world\s+name=[\"']([^\"']+)[\"']", world_file.read())
+    if not match:
+        raise RuntimeError(f"No <world name=...> found in {world_sdf_path}")
+    return match.group(1)
 
 
 def launch_setup(context, *args, **kwargs):
@@ -96,12 +110,15 @@ def launch_setup(context, *args, **kwargs):
         launch_arguments={
             "description_file": description_file,
             "description_xacro_args": description_xacro_args,
+            "controllers_file": controllers_file_str,
             "use_sim_time": "true",
             "initial_joint_controller": initial_joint_controller,
             "activate_joint_controller": activate_joint_controller,
             "launch_rviz": launch_rviz,
             "rviz_config_file": rviz_config_file,
             "launch_rerun": launch_rerun,
+            "mcp": LaunchConfiguration("mcp"),
+            "mcp_port": LaunchConfiguration("mcp_port"),
         }.items(),
     )
 
@@ -120,6 +137,29 @@ def launch_setup(context, *args, **kwargs):
         ],
     )
 
+    # Spawn into a paused world so gravity does not drop the arm before a
+    # controller holds it; unpause after spawn so the manager can activate.
+    world_name = _world_name(LaunchConfiguration("world_file").perform(context))
+    unpause_sim = ExecuteProcess(
+        cmd=[
+            "gz",
+            "service",
+            "-s",
+            f"/world/{world_name}/control",
+            "--reqtype",
+            "gz.msgs.WorldControl",
+            "--reptype",
+            "gz.msgs.Boolean",
+            "--timeout",
+            "5000",
+            "--req",
+            "pause: false",
+        ],
+        output="screen",
+    )
+
+    # Composed server: the bridge shares the process with gz_server, which keeps
+    # the camera streams on intra-process transport.
     gzserver = GzServer(
         world_sdf_file=world_file,
         container_name="ros_gz_container",
@@ -146,6 +186,9 @@ def launch_setup(context, *args, **kwargs):
         gz_spawn_entity,
         gzserver,
         gz_sim_bridge,
+        RegisterEventHandler(
+            OnProcessExit(target_action=gz_spawn_entity, on_exit=[unpause_sim]),
+        ),
     ]
 
     if gazebo_gui.lower() == "true":
@@ -199,6 +242,17 @@ def generate_launch_description():
             description="URDF/XACRO description file (absolute path) with the robot.",
         ),
         DeclareLaunchArgument("launch_rviz", default_value="true", description="Launch RViz?"),
+        DeclareLaunchArgument(
+            "mcp",
+            default_value="false",
+            description="Enable the ROS MCP interface (rosbridge_server websocket + rosapi)? "
+            "Binds all interfaces (0.0.0.0) on mcp_port.",
+        ),
+        DeclareLaunchArgument(
+            "mcp_port",
+            default_value="9090",
+            description="Port for the rosbridge_server websocket.",
+        ),
         DeclareLaunchArgument(
             "launch_rerun", default_value="false", description="Launch the pai_rerun_visualizer node?"
         ),
